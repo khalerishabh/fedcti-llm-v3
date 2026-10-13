@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fedcti"
+version = "0.3.0"
+description = "FedCTI-LLM v3: calibration-aware federated LoRA fine-tuning for CTI entity extraction and ATT&CK technique mapping"
+authors = [{ name = "Rishabh Khale" }]
+requires-python = ">=3.10"
+dependencies = ["pyyaml>=6.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

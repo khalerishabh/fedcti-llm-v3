@@ -1,0 +1,21 @@
+# Colab already provides torch, numpy, pandas, scikit-learn and matplotlib.
+# Do not pin torch here: reinstalling it on Colab breaks the CUDA build.
+
+transformers>=4.51
+peft>=0.15
+accelerate>=1.6
+datasets>=3.5
+
+sentence-transformers>=4.1
+rank-bm25>=0.2.2
+
+mitreattack-python>=3.0
+stix2>=3.0
+
+datasketch>=1.6
+iterative-stratification>=0.1.9
+
+scipy>=1.13
+statsmodels>=0.14
+pyyaml>=6.0
+tqdm>=4.66

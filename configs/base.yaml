@@ -1,0 +1,58 @@
+project: fedcti-llm-v3
+
+paths:
+  drive_root: /content/drive/MyDrive/fedcti_v3
+  local_root: ./_local
+
+models:
+  primary:
+    name: Qwen/Qwen3-4B
+    revision: null
+  cross:
+    name: meta-llama/Llama-3.1-8B-Instruct
+    revision: null
+  continuity:
+    name: Qwen/Qwen2.5-3B-Instruct
+    revision: null
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  targets: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  ffa: true
+  ffa_a_seed: 1234
+
+train:
+  lr_grid: [5.0e-5, 1.0e-4, 2.0e-4]
+  ffa_lr_grid: [1.0e-4, 2.0e-4, 5.0e-4]
+  epoch_grid: [1, 2, 3]
+  scheduler: cosine
+  warmup_ratio: 0.05
+  effective_batch: 16
+  bf16: true
+  attn_implementation: sdpa
+
+fl:
+  num_clients: 5
+  rounds: 10
+  dirichlet_alpha: 0.5
+  holdout_frac: 0.15
+  holdout_min: 50
+  fedprox_mu: 0.01
+
+cal_fedavg:
+  shrink_m0: 30
+  eps: 0.02
+  lambda_size: 0.5
+  clip: 0.35
+  quality: ece
+  importance: inverse_zero_shot
+
+eval:
+  ece_bins: 15
+  ece_binning: equal_mass
+  bootstrap_resamples: 10000
+  ci: 0.95
+
+seeds: [0, 1, 2]

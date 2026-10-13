@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Environments and secrets
+.venv/
+venv/
+.env
+.env.*
+*.token
+secrets/
+kaggle.json
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Data, models and run outputs live on Google Drive, never in git
+data/
+runs/
+results/
+adapters/
+checkpoints/
+wandb/
+hf_cache/
+external/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.parquet
+*.arrow
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+_local/

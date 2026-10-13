@@ -1,0 +1,27 @@
+exp: exp2
+
+tram:
+  repo: https://github.com/center-for-threat-informed-defense/tram.git
+  commit: f29793d8d665f7f552898696e00065ef24a29a20
+  multi_label_file: data/tram2-data/multi_label.json
+
+attack:
+  domain: enterprise-attack
+  version: "15.1"
+
+preprocess:
+  collapse_subtechniques: true
+  none_max_fraction: 0.5
+  dedup:
+    exact: true
+    minhash_jaccard: 0.9
+    minhash_num_perm: 128
+
+split:
+  train: 0.7
+  val: 0.1
+  test: 0.2
+  group_by: doc_title
+  seed: 42
+
+protocols: [P-ML, P-K]
