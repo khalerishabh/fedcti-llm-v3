@@ -6,7 +6,7 @@
    already has one). Then push from your machine:
 
    ```bash
-   git remote add origin https://github.com/<you>/fedcti-llm-v3.git
+   git remote add origin https://github.com/khalerishabh/fedcti-llm-v3.git
    git push -u origin main
    ```
 
@@ -23,7 +23,7 @@
 4. **Let Colab open private notebooks**: File > Open notebook > GitHub tab, tick
    "Include private repos", and authorize when GitHub asks.
 
-5. In `notebooks/00_colab_setup.ipynb`, set `GITHUB_USER` in the first code cell.
+5. `GITHUB_USER` in `notebooks/00_colab_setup.ipynb` is already set to `khalerishabh`.
 
 ## Every session
 
