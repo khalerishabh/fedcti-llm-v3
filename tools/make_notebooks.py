@@ -41,7 +41,7 @@ else:
     git("-C", REPO_DIR, "remote", "set-url", "origin",
         f"https://github.com/{GITHUB_USER}/{REPO_NAME}.git")
 git("-C", REPO_DIR, "config", "user.name", "Rishabh Khale")
-git("-C", REPO_DIR, "config", "user.email", "khalerishabhproff@gmail.com")
+git("-C", REPO_DIR, "config", "user.email", "khalerishabh998@gmail.com")
 
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r",
                 f"{REPO_DIR}/requirements.txt", "-e", REPO_DIR], check=True)
