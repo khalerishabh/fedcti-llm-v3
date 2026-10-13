@@ -17,7 +17,7 @@
    - Expiry: e.g. 90 days
 
 3. **Store it in Colab**: open any notebook, click the key icon in the left sidebar, add a
-   secret named `GITHUB_TOKEN`, paste the token, and enable "Notebook access".
+   secret named `GITHUB_TOKEN_FEDCTI`, paste the token, and enable "Notebook access".
    Never paste the token into a cell.
 
 4. **Let Colab open private notebooks**: File > Open notebook > GitHub tab, tick

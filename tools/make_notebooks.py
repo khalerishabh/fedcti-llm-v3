@@ -23,7 +23,7 @@ import os, subprocess, sys
 from google.colab import drive, userdata
 
 drive.mount("/content/drive")
-token = userdata.get("GITHUB_TOKEN")
+token = userdata.get("GITHUB_TOKEN_FEDCTI")
 auth_url = f"https://{token}@github.com/{GITHUB_USER}/{REPO_NAME}.git"
 
 
@@ -58,7 +58,7 @@ Every notebook in this repo starts with the same bootstrap cell (Drive mount, cl
 install). This notebook runs only that cell plus environment checks, so use it once to confirm
 the GitHub token, Drive and GPU are working.
 
-Prerequisite: Colab secret `GITHUB_TOKEN` (key icon, left sidebar, notebook access on).
+Prerequisite: Colab secret `GITHUB_TOKEN_FEDCTI` (key icon, left sidebar, notebook access on).
 See `docs/colab_workflow.md`.
 '''),
     BOOTSTRAP,
