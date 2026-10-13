@@ -208,6 +208,223 @@ else:
 ]
 
 
+EXP2_SHORTLIST = [
+    md("""
+# Exp 2 / 02 - Candidate shortlist (E2.2)
+
+Runtime: a T4 GPU is plenty (the dense encoder is 110M parameters); CPU also works but the
+encoding step takes several minutes. Requires `01_data_prep` to have finished.
+
+**What this stage does.** The classifier will not choose among all 202 ATT&CK techniques; it
+chooses among a short list of candidates. This notebook builds that list for every sentence:
+
+| Stage | What it does |
+| --- | --- |
+| E2.2a technique docs | One text per active parent technique in ATT&CK v15.1: name, tactics, first 150 words of the description, up to two procedure examples. Procedure examples that overlap any TRAM sentence are dropped, because ATT&CK often quotes the same reports TRAM annotated. |
+| E2.2b retrieve | Scores every sentence against all 202 docs with BM25 (word overlap) and bge-base (meaning), then fuses the two rankings with reciprocal rank fusion. |
+| E2.2c choose K | Smallest K whose validation coverage (share of gold labels inside the top-K) reaches 90%. |
+
+The retriever is never trained, so the federated contribution stays in the classifier.
+
+**Test split.** Shortlists are computed for test too (later stages need them), but test
+coverage is not printed here. Test numbers are opened once, after every choice is frozen.
+"""),
+    BOOTSTRAP,
+    code("""
+import json
+import numpy as np
+import pandas as pd
+
+from fedcti.config import load_config
+from fedcti.paths import data_dir, results_dir
+from fedcti.stages import run_stage
+from fedcti.data.attack import AttackIndex
+from fedcti.data import tram as T
+from fedcti.retrieval import retrieve as R
+from fedcti.retrieval.technique_docs import LeakFilter, build_technique_docs
+
+cfg = load_config("exp2/data.yaml", "exp2/retrieval.yaml")
+rc = cfg["retrieval"]
+RAW, CLEAN, SPLITS = (data_dir(cfg, "exp2", s) for s in ("raw", "clean", "splits"))
+RET = data_dir(cfg, "exp2", "retrieval")
+FIG = results_dir(cfg) / "figures"
+FIG.mkdir(parents=True, exist_ok=True)
+
+assert (SPLITS / "_DONE.json").exists(), "run 01_data_prep first"
+if not (SPLITS / "review_signoff.json").exists():
+    print("WARNING: E2.1 spot check not signed off")
+"""),
+    md("""
+## E2.2a Technique documents
+"""),
+    code("""
+DOCS_DIR = RET / "docs"
+
+
+def make_docs(out):
+    attack = AttackIndex.from_file(RAW / "enterprise-attack-15.1.json")
+    raw_sentences = [r["text"] for r in T.load_tram_multilabel(RAW / "tram_multi_label.json")]
+    leak = LeakFilter(raw_sentences, rc["procedure_leak_min_containment"])
+    docs, stats = build_technique_docs(attack, rc, leak)
+    T.write_jsonl(docs, out / "technique_docs.jsonl")
+    return stats
+
+
+print(run_stage("E2.2a technique docs", DOCS_DIR, make_docs, cfg))
+docs = T.read_jsonl(DOCS_DIR / "technique_docs.jsonl")
+DOC_IDS = [d["id"] for d in docs]
+print(len(docs), "techniques")
+print(next(d for d in docs if d["id"] == "T1055")["text"][:900])
+"""),
+    md("""
+## E2.2b Retrieve (BM25 + dense + fusion)
+"""),
+    code("""
+SCORES_DIR = RET / "scores"
+items = T.read_jsonl(CLEAN / "items.jsonl")
+
+
+def run_retrieval(out):
+    import torch
+
+    texts = [r["text"] for r in items]
+    bm25 = R.BM25Retriever([d["text"] for d in docs], rc["bm25_k1"], rc["bm25_b"]).scores(texts)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dense_model = R.DenseRetriever(rc["dense_model"], rc["dense_revision"], rc["query_instruction"],
+                                   rc["batch_size"], device)
+    dense = dense_model.scores(texts, dense_model.encode([d["text"] for d in docs]))
+    hybrid = R.rrf([bm25, dense], rc["rrf_k"])
+    np.savez_compressed(out / "scores.npz", bm25=bm25, dense=dense, hybrid=hybrid,
+                        uids=np.array([r["uid"] for r in items]), doc_ids=np.array(DOC_IDS))
+
+    for split in ("train", "val", "test"):
+        idx = [i for i, r in enumerate(items) if r["split"] == split]
+        lists = {name: R.top_ids(m[idx], DOC_IDS, rc["keep_top"])
+                 for name, m in (("hybrid", hybrid), ("bm25", bm25), ("dense", dense))}
+        T.write_jsonl([{"uid": items[i]["uid"], **{n: lists[n][j] for n in lists}}
+                       for j, i in enumerate(idx)], out / f"shortlist_{split}.jsonl")
+    try:
+        from huggingface_hub import model_info
+        revision = model_info(rc["dense_model"]).sha
+    except Exception as exc:
+        revision = f"unresolved: {exc}"
+    return {"device": device, "dense_revision": revision, "items": len(items)}
+
+
+print(run_stage("E2.2b retrieve", SCORES_DIR, run_retrieval, cfg))
+"""),
+    md("""
+## E2.2c Coverage@K on validation and choice of K
+
+Two label spaces are reported:
+
+- **all**: all 202 techniques. This is the main setting and matches Krasovec et al.
+- **tram**: only the techniques that occur in the training split (TRAM annotators used about 50).
+  It shows how much easier the task becomes when the label space is known in advance.
+"""),
+    code("""
+SELECT_DIR = RET / "selection"
+KS = list(range(1, rc["k_max"] + 1))
+
+
+def select_k(out):
+    z = np.load(SCORES_DIR / "scores.npz")
+    split_of = [r["split"] for r in items]
+    gold = [r["labels"] for r in items]
+    tram_space = {lab for r in items if r["split"] == "train" for lab in r["labels"]}
+    rows = []
+    for split in ("train", "val"):
+        idx = [i for i, s in enumerate(split_of) if s == split]
+        for retriever in ("hybrid", "bm25", "dense"):
+            for space, allowed in (("all", None), ("tram", tram_space)):
+                ranked = R.top_ids(z[retriever][idx], DOC_IDS, rc["k_max"], allowed)
+                cov = R.coverage_at_k(ranked, [gold[i] for i in idx], KS)
+                for k in KS:
+                    rows.append({"split": split, "retriever": retriever, "space": space, "k": k,
+                                 "label_cov": cov["label"][k], "item_all_cov": cov["item_all"][k]})
+    curves = pd.DataFrame(rows)
+    curves.to_csv(out / "coverage_curves.csv", index=False)
+
+    main = curves.query("split == 'val' and retriever == 'hybrid' and space == 'all'")
+    curve = dict(zip(main["k"], main["label_cov"]))
+    k_star = R.smallest_k(curve, rc["coverage_target"])
+    selected = {
+        "k": k_star, "rule": f"smallest K with val label coverage >= {rc['coverage_target']}",
+        "val_label_cov_at_k": curve.get(k_star), "val_label_cov_at_6": curve[6],
+        "fallback_needed": k_star is None or k_star > 20,
+    }
+    (out / "selected_k.json").write_text(json.dumps(selected, indent=2))
+    return selected
+
+
+print(run_stage("E2.2c select K", SELECT_DIR, select_k, cfg))
+curves = pd.read_csv(SELECT_DIR / "coverage_curves.csv")
+selected = json.loads((SELECT_DIR / "selected_k.json").read_text())
+K_STAR = selected["k"]
+show_k = sorted({1, 3, 5, 6, 10, 15, 20, 30, K_STAR or 50})
+table = (curves.query("split == 'val' and k in @show_k")
+         .pivot_table(index=["space", "retriever"], columns="k", values="label_cov")
+         .round(3))
+display(table)
+"""),
+    code("""
+import matplotlib.pyplot as plt
+
+SERIES = {"hybrid": "#2a78d6", "bm25": "#eb6834", "dense": "#1baf7a"}
+INK, MUTED, GRID = "#1f1f1e", "#6b6a63", "#e6e5e0"
+
+fig, ax = plt.subplots(figsize=(7.2, 4.2), dpi=150)
+val = curves.query("split == 'val' and space == 'all'")
+for name, color in SERIES.items():
+    c = val.query("retriever == @name")
+    ax.plot(c["k"], c["label_cov"] * 100, color=color, lw=2, label=name)
+    ax.annotate(name, (c["k"].iloc[-1], c["label_cov"].iloc[-1] * 100), xytext=(4, 0),
+                textcoords="offset points", va="center", fontsize=8, color=INK)
+ax.axhline(rc["coverage_target"] * 100, color=MUTED, lw=1, ls="--")
+ax.text(rc["k_max"], rc["coverage_target"] * 100 + 0.8, "90% target", ha="right", fontsize=8,
+        color=MUTED)
+kref = rc["krasovec_reference"]
+ax.plot([kref["k"]], [kref["coverage"] * 100], marker="D", ms=8, color=INK, ls="none",
+        label="Krasovec et al. 2025 (cross-paper)")
+if K_STAR:
+    ax.axvline(K_STAR, color=GRID, lw=1)
+    ax.text(K_STAR + 0.5, 12, f"K* = {K_STAR}", fontsize=8, color=MUTED)
+ax.set_xlabel("K (candidates in shortlist)", color=INK)
+ax.set_ylabel("Gold labels covered (%)", color=INK)
+ax.set_title("Shortlist coverage on validation, 202 ATT&CK techniques", fontsize=10, color=INK)
+ax.set_ylim(0, 100)
+ax.set_xlim(1, rc["k_max"] + 5)
+ax.grid(color=GRID, lw=0.6)
+for side in ("top", "right"):
+    ax.spines[side].set_visible(False)
+ax.legend(frameon=False, fontsize=8, loc="lower right")
+fig.tight_layout()
+fig.savefig(FIG / "exp2_shortlist_coverage_val.png")
+plt.show()
+"""),
+    md("""
+## Where the retriever misses (validation)
+
+Validation items whose gold technique is outside the top-K*. Read a few: misses usually come
+from vague sentences or from labels that need context from neighbouring sentences.
+"""),
+    code("""
+val_items = [r for r in items if r["split"] == "val" and r["labels"]]
+short = {r["uid"]: r for r in T.read_jsonl(SCORES_DIR / "shortlist_val.jsonl")}
+names = {d["id"]: d["name"] for d in docs}
+k = K_STAR or rc["k_max"]
+misses = [r for r in val_items if not set(r["labels"]) <= set(short[r["uid"]]["hybrid"][:k])]
+print(f"{len(misses)} of {len(val_items)} labelled val items have a gold label outside top-{k}")
+for r in misses[:12]:
+    top = short[r["uid"]]["hybrid"]
+    rank = {g: (top.index(g) + 1 if g in top else ">50") for g in r["labels"]}
+    print(f"gold {[f'{g} {names[g]} (rank {rank[g]})' for g in r['labels']]}")
+    print(f"    top5 {[names[t] for t in top[:5]]}")
+    print(f"    {r['text'][:220]}\\n")
+"""),
+]
+
+
 def write(cells, rel):
     nb = {"cells": cells,
           "metadata": {"colab": {"provenance": []},
@@ -225,4 +442,5 @@ def write(cells, rel):
 if __name__ == "__main__":
     write(SETUP, "notebooks/00_colab_setup.ipynb")
     write(EXP2_DATA, "notebooks/exp2/01_data_prep.ipynb")
+    write(EXP2_SHORTLIST, "notebooks/exp2/02_shortlist.ipynb")
     sys.exit(0)

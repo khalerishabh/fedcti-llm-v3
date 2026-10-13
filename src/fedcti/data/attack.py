@@ -37,6 +37,7 @@ class AttackIndex:
     def __init__(self, bundle: dict):
         self.by_stix: dict[str, Technique] = {}
         revoked_by: dict[str, str] = {}
+        procedures: dict[str, list[tuple[str, str]]] = {}
         for obj in bundle["objects"]:
             if obj.get("type") == "attack-pattern":
                 ext_id = next((r["external_id"] for r in obj.get("external_references", [])
@@ -58,7 +59,13 @@ class AttackIndex:
                 )
             elif obj.get("type") == "relationship" and obj.get("relationship_type") == "revoked-by":
                 revoked_by[obj["source_ref"]] = obj["target_ref"]
+            elif (obj.get("type") == "relationship" and obj.get("relationship_type") == "uses"
+                  and obj.get("target_ref", "").startswith("attack-pattern--")
+                  and not obj.get("revoked", False) and not obj.get("x_mitre_deprecated", False)
+                  and obj.get("description")):
+                procedures.setdefault(obj["target_ref"], []).append((obj["id"], obj["description"]))
         self.revoked_by = revoked_by
+        self.procedures_by_stix = procedures
         self.by_id: dict[str, Technique] = {}
         for tech in self.by_stix.values():
             current = self.by_id.get(tech.id)
@@ -110,3 +117,13 @@ class AttackIndex:
                 return None, parent_reason
             return parent_id, "collapsed" if reason == "ok" else reason
         return tech.id, reason
+
+    def procedures(self, tech_id: str, include_subtechniques: bool = True) -> list[tuple[str, str]]:
+        """(relationship id, raw text) procedure examples, sorted by relationship id."""
+        out = []
+        for tech in self.by_stix.values():
+            if not tech.active:
+                continue
+            if tech.id == tech_id or (include_subtechniques and tech.id.startswith(tech_id + ".")):
+                out.extend(self.procedures_by_stix.get(tech.stix_id, []))
+        return sorted(out)
